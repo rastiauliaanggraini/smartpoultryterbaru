@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "65413671971",
+    "project_id": "smartpoultr",
+    "storage_bucket": "smartpoultr.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:65413671971:android:3e0222042bed2d6d249596",
+        "android_client_info": {
+          "package_name": "com.example.myapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC9bBKzWhUWYnaHoR6Orvqo9pGitmgMSAU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
