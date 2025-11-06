@@ -24,7 +24,15 @@ class MyApp extends StatelessWidget {
         builder: (context, themeProvider, child) {
           return MaterialApp(
             title: 'Smart Poultry',
-            theme: themeProvider.getTheme(),
+            themeMode: themeProvider.themeMode,
+            theme: ThemeData(
+              brightness: Brightness.light,
+              primarySwatch: Colors.blue,
+            ),
+            darkTheme: ThemeData(
+              brightness: Brightness.dark,
+              primarySwatch: Colors.blue,
+            ),
             home: const LoginPage(),
             debugShowCheckedModeBanner: false,
           );
@@ -33,3 +41,4 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+ 

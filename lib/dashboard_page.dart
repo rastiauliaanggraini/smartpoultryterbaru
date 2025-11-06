@@ -1,5 +1,6 @@
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:myapp/login_page.dart';
@@ -18,16 +19,27 @@ class _DashboardPageState extends State<DashboardPage> {
   Timer? _timer;
   double _temperature = 25.0;
   double _humidity = 60.0;
+  String _predictionResult = '';
+  String _predictionStatus = '';
+  List<String> _recommendations = [];
+
+  final _chickenController = TextEditingController();
+  final _feedController = TextEditingController();
+  final _ammoniaController = TextEditingController();
+  final _lightController = TextEditingController();
+  final _noiseController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
       setState(() {
-        _temperature += 0.1;
-        _humidity -= 0.2;
-        if (_temperature > 30) _temperature = 25;
-        if (_humidity < 50) _humidity = 60;
+        _temperature += (DateTime.now().second % 2 == 0) ? 0.1 : -0.1;
+        _humidity += (DateTime.now().second % 2 == 0) ? 0.2 : -0.2;
+        if (_temperature > 28) _temperature = 28;
+        if (_temperature < 22) _temperature = 22;
+        if (_humidity > 70) _humidity = 70;
+        if (_humidity < 55) _humidity = 55;
       });
     });
   }
@@ -35,6 +47,11 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _chickenController.dispose();
+    _feedController.dispose();
+    _ammoniaController.dispose();
+    _lightController.dispose();
+    _noiseController.dispose();
     super.dispose();
   }
 
@@ -59,17 +76,107 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  void _calculatePrediction() {
+    final chickens = int.tryParse(_chickenController.text) ?? 0;
+    final feed = double.tryParse(_feedController.text) ?? 0.0;
+    final ammonia = double.tryParse(_ammoniaController.text) ?? 0.0;
+    final light = double.tryParse(_lightController.text) ?? 0.0;
+    final noise = double.tryParse(_noiseController.text) ?? 0.0;
+    final temp = _temperature;
+    final humidity = _humidity;
+
+    if (chickens <= 0 || chickens > 10000) {
+        setState(() {
+            _predictionResult = 'Jumlah ayam tidak valid (100-10,000).';
+            _predictionStatus = '';
+            _recommendations = [];
+        });
+        return;
+    }
+
+    // --- Rombakan Logika Prediksi ---
+    double baseProduction = chickens * 0.85;
+    double predictedEggs = baseProduction;
+    bool isDanger = false;
+    List<String> recommendations = [];
+
+    // 1. Analisis Pakan (Faktor Paling Kritis)
+    final feedProvided = feed * 1000; // kg to grams
+    final requiredFeed = chickens * 120; // 120g/ekor
+    
+    double feedEffect = 1.0; // Assume 100% effect if feed is sufficient
+    if (feedProvided < requiredFeed) {
+        isDanger = true;
+        final idealFeedMin = (chickens * 100) / 1000;
+        final idealFeedMax = (chickens * 150) / 1000;
+        recommendations.add('Jumlah pakan tidak sesuai! Idealnya ${idealFeedMin.toStringAsFixed(1)}-${idealFeedMax.toStringAsFixed(1)} kg.');
+        
+        // Efek pakan menjadi faktor pengali utama. Jika pakan 10%, produksi maks 10%.
+        feedEffect = feedProvided / requiredFeed;
+    }
+    predictedEggs *= feedEffect;
+
+    // 2. Analisis Faktor Lingkungan (Ammonia, Suhu, dll.)
+    // Penalti diterapkan pada hasil setelah penyesuaian pakan.
+    if (ammonia > 25) {
+        predictedEggs *= 0.9;
+        isDanger = true;
+        recommendations.add('Kadar amonia berbahaya, periksa ventilasi dan litter segera.');
+    }
+
+    if (noise > 60) {
+        predictedEggs *= 0.95;
+        isDanger = true;
+        recommendations.add('Kebisingan terlalu tinggi, kurangi sumber kebisingan untuk mencegah stress.');
+    }
+
+    if (light < 10 || light > 20) {
+        predictedEggs *= 0.98;
+        recommendations.add('Intensitas cahaya tidak optimal (10-20 lux). Atur pencahayaan.');
+    }
+
+    if (temp > 25) {
+        predictedEggs *= 0.97;
+        isDanger = true;
+        recommendations.add('Suhu terlalu panas, tingkatkan ventilasi dan sediakan air cukup.');
+    } else if (temp < 20) {
+        predictedEggs *= 0.97;
+        isDanger = true;
+        recommendations.add('Suhu terlalu dingin! Aktifkan sistem pemanas.');
+    }
+
+    if (humidity > 70 || humidity < 50) {
+        predictedEggs *= 0.98; // Minor penalty for humidity
+        isDanger = true;
+        recommendations.add('Kelembaban kritis, perbaiki ventilasi dan cek kebocoran air.');
+    }
+
+    setState(() {
+        // Pastikan prediksi tidak negatif
+        _predictionResult = '${max(0, predictedEggs.round())} Telur';
+        _predictionStatus = isDanger ? 'Danger' : 'Healthy';
+        if (recommendations.isEmpty && !isDanger) {
+            _recommendations = ['Kondisi optimal. Pertahankan manajemen saat ini.'];
+        } else {
+            _recommendations = recommendations;
+        }
+    });
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Dashboard'),
+        title: const Text('Smart Poultry Dashboard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
+            tooltip: 'Logout',
           ),
         ],
       ),
@@ -80,12 +187,12 @@ class _DashboardPageState extends State<DashboardPage> {
           children: [
             Text(
               'Welcome, ${user?.email ?? 'User'}',
-              style: Theme.of(context).textTheme.titleLarge,
+              style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 24.0),
             Text(
               'Real-time Sensor Data',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: textTheme.titleLarge,
             ),
             const SizedBox(height: 16.0),
             Row(
@@ -95,6 +202,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     icon: Icons.thermostat,
                     label: 'Temperature',
                     value: '${_temperature.toStringAsFixed(1)} °C',
+                    color: Colors.redAccent,
                   ),
                 ),
                 const SizedBox(width: 16.0),
@@ -103,6 +211,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     icon: Icons.water_drop,
                     label: 'Humidity',
                     value: '${_humidity.toStringAsFixed(1)} %',
+                    color: Colors.blueAccent,
                   ),
                 ),
               ],
@@ -110,17 +219,33 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 24.0),
             Text(
               'Manual Input Parameters',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: textTheme.titleLarge,
             ),
             const SizedBox(height: 16.0),
-            const ManualInputGrid(),
+            ManualInputForm(
+              chickenController: _chickenController,
+              feedController: _feedController,
+              ammoniaController: _ammoniaController,
+              lightController: _lightController,
+              noiseController: _noiseController,
+            ),
             const SizedBox(height: 24.0),
             Center(
               child: ElevatedButton(
-                onPressed: () {},
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
+                  textStyle: textTheme.titleMedium,
+                ),
+                onPressed: _calculatePrediction,
                 child: const Text('Calculate Prediction'),
               ),
             ),
+            if (_predictionResult.isNotEmpty)
+              PredictionResultCard(
+                result: _predictionResult,
+                status: _predictionStatus,
+                recommendations: _recommendations,
+              ),
           ],
         ),
       ),
@@ -150,26 +275,30 @@ class SensorCard extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
+  final Color color;
 
   const SensorCard({
     super.key,
     required this.icon,
     required this.label,
     required this.value,
+    this.color = Colors.grey,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Icon(icon, size: 40, color: Theme.of(context).colorScheme.primary),
+            Icon(icon, size: 40, color: color),
             const SizedBox(height: 8.0),
             Text(label, style: Theme.of(context).textTheme.bodyLarge),
             const SizedBox(height: 4.0),
-            Text(value, style: Theme.of(context).textTheme.headlineSmall),
+            Text(value, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -177,49 +306,123 @@ class SensorCard extends StatelessWidget {
   }
 }
 
-class ManualInputGrid extends StatelessWidget {
-  const ManualInputGrid({super.key});
+class ManualInputForm extends StatelessWidget {
+  final TextEditingController chickenController;
+  final TextEditingController feedController;
+  final TextEditingController ammoniaController;
+  final TextEditingController lightController;
+  final TextEditingController noiseController;
 
-  @override
-  Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 16.0,
-      mainAxisSpacing: 16.0,
-      childAspectRatio: 2.5,
-      children: const [
-        InputChip(label: 'Amount of Chicken', initialValue: '100'),
-        InputChip(label: 'Ammonia (ppm)', initialValue: '20'),
-        InputChip(label: 'Day', initialValue: '30'),
-        InputChip(label: 'Average Weight (gr)', initialValue: '1500'),
-        InputChip(label: 'Feed Consumption (gr)', initialValue: '120'),
-        InputChip(label: 'Water Consumption (L)', initialValue: '250'),
-      ],
-    );
-  }
-}
-
-class InputChip extends StatelessWidget {
-  final String label;
-  final String initialValue;
-
-  const InputChip({
+  const ManualInputForm({
     super.key,
-    required this.label,
-    required this.initialValue,
+    required this.chickenController,
+    required this.feedController,
+    required this.ammoniaController,
+    required this.lightController,
+    required this.noiseController,
   });
 
   @override
   Widget build(BuildContext context) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            _buildTextField(label: 'Jumlah Ayam (100-10,000)', controller: chickenController),
+            const SizedBox(height: 16),
+            _buildTextField(label: 'Jumlah Pakan (kg)', controller: feedController),
+            const SizedBox(height: 16),
+            _buildTextField(label: 'Amonia (ppm)', controller: ammoniaController),
+            const SizedBox(height: 16),
+            _buildTextField(label: 'Intensitas Cahaya (lux)', controller: lightController),
+            const SizedBox(height: 16),
+            _buildTextField(label: 'Kebisingan (dB)', controller: noiseController),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({required String label, required TextEditingController controller}) {
     return TextFormField(
-      initialValue: initialValue,
+      controller: controller,
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
+        filled: true,
+        fillColor: Colors.grey[200]?.withAlpha(128),
       ),
       keyboardType: TextInputType.number,
+    );
+  }
+}
+
+class PredictionResultCard extends StatelessWidget {
+  final String result;
+  final String status;
+  final List<String> recommendations;
+
+  const PredictionResultCard({
+    super.key,
+    required this.result,
+    required this.status,
+    required this.recommendations,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final isDanger = status == 'Danger';
+    final statusColor = isDanger ? Colors.redAccent : Colors.green;
+    final statusIcon = isDanger ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded;
+
+    return Card(
+      margin: const EdgeInsets.only(top: 24.0),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Hasil Analisis', style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+            const Divider(thickness: 1, height: 24),
+
+            // Prediction
+            ListTile(
+              leading: const Icon(Icons.egg_outlined, size: 40),
+              title: Text(result, style: textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
+              subtitle: Text('Prediksi Produksi Telur', style: textTheme.bodyLarge),
+            ),
+            const SizedBox(height: 16),
+
+            // Status
+            ListTile(
+              leading: Icon(statusIcon, size: 40, color: statusColor),
+              title: Text(status, style: textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold, color: statusColor)),
+              subtitle: Text('Status Kandang', style: textTheme.bodyLarge),
+            ),
+            const SizedBox(height: 16),
+
+            // Recommendations
+            Text('Rekomendasi:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ...recommendations.map((rec) => Padding(
+              padding: const EdgeInsets.only(left: 16.0, bottom: 4.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('• ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Expanded(child: Text(rec, style: textTheme.bodyLarge)),
+                ],
+              ),
+            )),
+          ],
+        ),
+      ),
     );
   }
 }
