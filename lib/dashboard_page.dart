@@ -1,4 +1,10 @@
+
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:myapp/login_page.dart';
+import 'package:myapp/notifications_page.dart';
+import 'package:myapp/settings_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -9,26 +15,61 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = 0;
+  Timer? _timer;
+  double _temperature = 25.0;
+  double _humidity = 60.0;
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      setState(() {
+        _temperature += 0.1;
+        _humidity -= 0.2;
+        if (_temperature > 30) _temperature = 25;
+        if (_humidity < 50) _humidity = 60;
+      });
     });
   }
 
   @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onItemTapped(int index) {
+    if (index == 1) {
+      Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()));
+    } else if (index == 2) {
+      Navigator.push(context, MaterialPageRoute(builder: (context) => const NotificationsPage()));
+    } else {
+      setState(() {
+        _selectedIndex = index;
+      });
+    }
+  }
+
+  Future<void> _logout() async {
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: const Text('Prediction Dashboard'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0,
+        title: const Text('Dashboard'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: () {},
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
           ),
         ],
       ),
@@ -37,60 +78,47 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Welcome, rgg@gmail.com.',
-              style: TextStyle(fontSize: 16, color: Colors.black54),
+            Text(
+              'Welcome, ${user?.email ?? 'User'}',
+              style: Theme.of(context).textTheme.titleLarge,
             ),
-            const SizedBox(height: 24),
-            const Text(
+            const SizedBox(height: 24.0),
+            Text(
               'Real-time Sensor Data',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 16.0),
             Row(
-              children: const [
+              children: [
                 Expanded(
                   child: SensorCard(
-                    title: 'Temperature',
-                    value: '25.3 °C',
                     icon: Icons.thermostat,
-                    iconColor: Colors.orange,
+                    label: 'Temperature',
+                    value: '${_temperature.toStringAsFixed(1)} °C',
                   ),
                 ),
-                SizedBox(width: 16),
+                const SizedBox(width: 16.0),
                 Expanded(
                   child: SensorCard(
-                    title: 'Humidity',
-                    value: '60.7 %',
                     icon: Icons.water_drop,
-                    iconColor: Colors.blue,
+                    label: 'Humidity',
+                    value: '${_humidity.toStringAsFixed(1)} %',
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            const Text(
+            const SizedBox(height: 24.0),
+            Text(
               'Manual Input Parameters',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 16.0),
             const ManualInputGrid(),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
+            const SizedBox(height: 24.0),
+            Center(
               child: ElevatedButton(
                 onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D47A1),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Calculate Prediction',
-                  style: TextStyle(fontSize: 18, color: Colors.white),
-                ),
+                child: const Text('Calculate Prediction'),
               ),
             ),
           ],
@@ -99,8 +127,8 @@ class _DashboardPageState extends State<DashboardPage> {
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(
-            icon: Icon(Icons.insights),
-            label: 'Prediction',
+            icon: Icon(Icons.home),
+            label: 'Home',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
@@ -112,7 +140,6 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ],
         currentIndex: _selectedIndex,
-        selectedItemColor: const Color(0xFF0D47A1),
         onTap: _onItemTapped,
       ),
     );
@@ -120,41 +147,29 @@ class _DashboardPageState extends State<DashboardPage> {
 }
 
 class SensorCard extends StatelessWidget {
-  final String title;
-  final String value;
   final IconData icon;
-  final Color iconColor;
+  final String label;
+  final String value;
 
   const SensorCard({
     super.key,
-    required this.title,
-    required this.value,
     required this.icon,
-    required this.iconColor,
+    required this.label,
+    required this.value,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(title, style: const TextStyle(color: Colors.black54)),
-                Icon(icon, color: iconColor),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
+            Icon(icon, size: 40, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 8.0),
+            Text(label, style: Theme.of(context).textTheme.bodyLarge),
+            const SizedBox(height: 4.0),
+            Text(value, style: Theme.of(context).textTheme.headlineSmall),
           ],
         ),
       ),
@@ -171,15 +186,16 @@ class ManualInputGrid extends StatelessWidget {
       crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
+      crossAxisSpacing: 16.0,
+      mainAxisSpacing: 16.0,
       childAspectRatio: 2.5,
       children: const [
-        InputChip(label: 'Amount of Chicken'),
-        InputChip(label: 'Amount of Feeding'),
-        InputChip(label: 'Ammonia (ppm)'),
-        InputChip(label: 'Light Intensity'),
-        InputChip(label: 'Noise (dB)'),
+        InputChip(label: 'Amount of Chicken', initialValue: '100'),
+        InputChip(label: 'Ammonia (ppm)', initialValue: '20'),
+        InputChip(label: 'Day', initialValue: '30'),
+        InputChip(label: 'Average Weight (gr)', initialValue: '1500'),
+        InputChip(label: 'Feed Consumption (gr)', initialValue: '120'),
+        InputChip(label: 'Water Consumption (L)', initialValue: '250'),
       ],
     );
   }
@@ -187,27 +203,23 @@ class ManualInputGrid extends StatelessWidget {
 
 class InputChip extends StatelessWidget {
   final String label;
+  final String initialValue;
 
-  const InputChip({super.key, required this.label});
+  const InputChip({
+    super.key,
+    required this.label,
+    required this.initialValue,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      textAlign: TextAlign.center,
+    return TextFormField(
+      initialValue: initialValue,
       decoration: InputDecoration(
-        hintText: label,
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        labelText: label,
+        border: const OutlineInputBorder(),
       ),
+      keyboardType: TextInputType.number,
     );
   }
 }
