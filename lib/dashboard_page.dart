@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:myapp/login_page.dart';
 import 'package:myapp/notifications_page.dart';
 import 'package:myapp/settings_page.dart';
@@ -16,9 +17,15 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = 0;
-  Timer? _timer;
-  double _temperature = 25.0;
-  double _humidity = 60.0;
+  
+  // Realtime Database reference
+  final DatabaseReference _sensorRef = FirebaseDatabase.instance.ref('sensor_data/dht22');
+
+  // State for sensor data will be managed by StreamBuilder, 
+  // but we need local copies for the prediction logic.
+  double _currentTemperature = 25.0;
+  double _currentHumidity = 60.0;
+
   String _predictionResult = '';
   String _predictionStatus = '';
   List<String> _recommendations = [];
@@ -30,23 +37,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final _noiseController = TextEditingController();
 
   @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      setState(() {
-        _temperature += (DateTime.now().second % 2 == 0) ? 0.1 : -0.1;
-        _humidity += (DateTime.now().second % 2 == 0) ? 0.2 : -0.2;
-        if (_temperature > 28) _temperature = 28;
-        if (_temperature < 22) _temperature = 22;
-        if (_humidity > 70) _humidity = 70;
-        if (_humidity < 55) _humidity = 55;
-      });
-    });
-  }
-
-  @override
   void dispose() {
-    _timer?.cancel();
     _chickenController.dispose();
     _feedController.dispose();
     _ammoniaController.dispose();
@@ -82,8 +73,10 @@ class _DashboardPageState extends State<DashboardPage> {
     final ammonia = double.tryParse(_ammoniaController.text) ?? 0.0;
     final light = double.tryParse(_lightController.text) ?? 0.0;
     final noise = double.tryParse(_noiseController.text) ?? 0.0;
-    final temp = _temperature;
-    final humidity = _humidity;
+    
+    // Use the latest data from Firebase
+    final temp = _currentTemperature;
+    final humidity = _currentHumidity;
 
     if (chickens <= 0 || chickens > 10000) {
         setState(() {
@@ -94,30 +87,24 @@ class _DashboardPageState extends State<DashboardPage> {
         return;
     }
 
-    // --- Rombakan Logika Prediksi ---
     double baseProduction = chickens * 0.85;
     double predictedEggs = baseProduction;
     bool isDanger = false;
     List<String> recommendations = [];
 
-    // 1. Analisis Pakan (Faktor Paling Kritis)
-    final feedProvided = feed * 1000; // kg to grams
-    final requiredFeed = chickens * 120; // 120g/ekor
+    final feedProvided = feed * 1000;
+    final requiredFeed = chickens * 120; 
     
-    double feedEffect = 1.0; // Assume 100% effect if feed is sufficient
+    double feedEffect = 1.0;
     if (feedProvided < requiredFeed) {
         isDanger = true;
         final idealFeedMin = (chickens * 100) / 1000;
         final idealFeedMax = (chickens * 150) / 1000;
         recommendations.add('Jumlah pakan tidak sesuai! Idealnya ${idealFeedMin.toStringAsFixed(1)}-${idealFeedMax.toStringAsFixed(1)} kg.');
-        
-        // Efek pakan menjadi faktor pengali utama. Jika pakan 10%, produksi maks 10%.
         feedEffect = feedProvided / requiredFeed;
     }
     predictedEggs *= feedEffect;
 
-    // 2. Analisis Faktor Lingkungan (Ammonia, Suhu, dll.)
-    // Penalti diterapkan pada hasil setelah penyesuaian pakan.
     if (ammonia > 25) {
         predictedEggs *= 0.9;
         isDanger = true;
@@ -146,13 +133,12 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     if (humidity > 70 || humidity < 50) {
-        predictedEggs *= 0.98; // Minor penalty for humidity
+        predictedEggs *= 0.98;
         isDanger = true;
         recommendations.add('Kelembaban kritis, perbaiki ventilasi dan cek kebocoran air.');
     }
 
     setState(() {
-        // Pastikan prediksi tidak negatif
         _predictionResult = '${max(0, predictedEggs.round())} Telur';
         _predictionStatus = isDanger ? 'Danger' : 'Healthy';
         if (recommendations.isEmpty && !isDanger) {
@@ -162,7 +148,6 @@ class _DashboardPageState extends State<DashboardPage> {
         }
     });
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -195,27 +180,55 @@ class _DashboardPageState extends State<DashboardPage> {
               style: textTheme.titleLarge,
             ),
             const SizedBox(height: 16.0),
-            Row(
-              children: [
-                Expanded(
-                  child: SensorCard(
-                    icon: Icons.thermostat,
-                    label: 'Temperature',
-                    value: '${_temperature.toStringAsFixed(1)} °C',
-                    color: Colors.redAccent,
-                  ),
-                ),
-                const SizedBox(width: 16.0),
-                Expanded(
-                  child: SensorCard(
-                    icon: Icons.water_drop,
-                    label: 'Humidity',
-                    value: '${_humidity.toStringAsFixed(1)} %',
-                    color: Colors.blueAccent,
-                  ),
-                ),
-              ],
+            
+            // --- StreamBuilder for Real-time Data ---
+            StreamBuilder(
+              stream: _sensorRef.onValue,
+              builder: (context, AsyncSnapshot<DatabaseEvent> snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.hasError || snapshot.data!.snapshot.value == null) {
+                  // Update local state for prediction logic with default values
+                  _currentTemperature = 25.0;
+                  _currentHumidity = 60.0;
+                  return const Text('No sensor data available or error.');
+                }
+
+                // Data is available, let's parse it
+                final data = Map<String, dynamic>.from(snapshot.data!.snapshot.value as Map);
+                final temp = data['temperature'] ?? 25.0;
+                final hum = data['humidity'] ?? 60.0;
+
+                // Update local state variables for prediction logic
+                _currentTemperature = (temp is int) ? temp.toDouble() : temp;
+                _currentHumidity = (hum is int) ? hum.toDouble() : hum;
+
+                return Row(
+                  children: [
+                    Expanded(
+                      child: SensorCard(
+                        icon: Icons.thermostat,
+                        label: 'Temperature',
+                        value: '${_currentTemperature.toStringAsFixed(1)} °C',
+                        color: Colors.redAccent,
+                      ),
+                    ),
+                    const SizedBox(width: 16.0),
+                    Expanded(
+                      child: SensorCard(
+                        icon: Icons.water_drop,
+                        label: 'Humidity',
+                        value: '${_currentHumidity.toStringAsFixed(1)} %',
+                        color: Colors.blueAccent,
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
+            // --- End of StreamBuilder ---
+
             const SizedBox(height: 24.0),
             Text(
               'Manual Input Parameters',
@@ -391,7 +404,6 @@ class PredictionResultCard extends StatelessWidget {
             Text('Hasil Analisis', style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const Divider(thickness: 1, height: 24),
 
-            // Prediction
             ListTile(
               leading: const Icon(Icons.egg_outlined, size: 40),
               title: Text(result, style: textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -399,7 +411,6 @@ class PredictionResultCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // Status
             ListTile(
               leading: Icon(statusIcon, size: 40, color: statusColor),
               title: Text(status, style: textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold, color: statusColor)),
@@ -407,7 +418,6 @@ class PredictionResultCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // Recommendations
             Text('Rekomendasi:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             ...recommendations.map((rec) => Padding(
