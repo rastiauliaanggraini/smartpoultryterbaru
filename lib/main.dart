@@ -5,7 +5,6 @@ import 'package:myapp/firebase_options.dart';
 import 'package:myapp/login_page.dart';
 import 'package:myapp/theme_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter/foundation.dart'; // Import to check for web platform
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,19 +12,16 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Platform-aware App Check initialization
-  if (kIsWeb) {
-    // For WEB: You need to set up reCAPTCHA v3 in your Firebase console 
-    // and provide the site key here.
-    await FirebaseAppCheck.instance.activate(
-      webProvider: ReCaptchaV3Provider('your-recaptcha-site-key-goes-here'),
-    );
-  } else {
-    // For ANDROID
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: AndroidProvider.playIntegrity,
-    );
-  }
+  // Aktifkan App Check. Ini akan secara otomatis menggunakan provider yang benar
+  // untuk platform (web atau Android) tempat aplikasi berjalan.
+  await FirebaseAppCheck.instance.activate(
+    // Untuk WEB: Anda perlu mengatur reCAPTCHA v3 di konsol Firebase Anda
+    // dan memberikan kunci situs di sini.
+    web: ReCaptchaV3Provider('your-recaptcha-site-key-goes-here'),
+    // Untuk ANDROID: Ini menggunakan Play Integrity. Untuk mode debug, Anda akan menggunakan
+    // AndroidProvider.debug.
+    android: AndroidProvider.playIntegrity,
+  );
 
   runApp(const MyApp());
 }
