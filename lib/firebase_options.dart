@@ -55,6 +55,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '65413671971',
     projectId: 'smartpoultr',
     authDomain: 'smartpoultr.firebaseapp.com',
+    databaseURL: 'https://smartpoultr-default-rtdb.firebaseio.com',
     storageBucket: 'smartpoultr.firebasestorage.app',
   );
 
@@ -63,6 +64,8 @@ class DefaultFirebaseOptions {
     appId: '1:65413671971:android:3e0222042bed2d6d249596',
     messagingSenderId: '65413671971',
     projectId: 'smartpoultr',
+    databaseURL: 'https://smartpoultr-default-rtdb.firebaseio.com',
     storageBucket: 'smartpoultr.firebasestorage.app',
   );
+
 }

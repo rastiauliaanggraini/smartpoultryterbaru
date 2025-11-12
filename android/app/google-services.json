@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "65413671971",
+    "firebase_url": "https://smartpoultr-default-rtdb.firebaseio.com",
     "project_id": "smartpoultr",
     "storage_bucket": "smartpoultr.firebasestorage.app"
   },
