@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:myapp/dashboard_page.dart';
 import 'package:myapp/firebase_options.dart';
+import 'package:myapp/forgot_password_page.dart';
 import 'package:myapp/login_page.dart';
-import 'package:myapp/notifications_page.dart';
-import 'package:myapp/settings_page.dart';
+import 'package:myapp/register_page.dart';
 import 'package:myapp/theme_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -37,10 +37,13 @@ class MyApp extends StatelessWidget {
               useMaterial3: true,
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.dark),
             ),
-            home: const AuthWrapper(),
+            initialRoute: '/',
             routes: {
-              '/settings': (context) => const SettingsPage(),
-              '/notifications': (context) => const NotificationsPage(),
+              '/': (context) => const AuthWrapper(),
+              '/login': (context) => const LoginPage(),
+              '/register': (context) => const RegisterPage(),
+              '/dashboard': (context) => const DashboardPage(),
+              '/forgot-password': (context) => const ForgotPasswordPage(),
             },
             debugShowCheckedModeBanner: false,
           );

@@ -1,3 +1,4 @@
+import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -22,7 +23,6 @@ enum PredictionStatus {
   danger,
 }
 
-
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
@@ -39,11 +39,28 @@ class _DashboardPageState extends State<DashboardPage> {
   final _lightIntensityController = TextEditingController();
   final _noiseController = TextEditingController();
 
-  // Variable to store the latest sensor data
-  double _latestTemp = 22.0; // Default to optimal value
-  double _latestHumidity = 60.0; // Default to optimal value
+  // Variable to store the latest sensor data for calculation
+  double _latestTemp = 22.0;
+  double _latestHumidity = 60.0;
+  
+  @override
+  void dispose() {
+    _chickenCountController.dispose();
+    _feedAmountController.dispose();
+    _ammoniaController.dispose();
+    _lightIntensityController.dispose();
+    _noiseController.dispose();
+    super.dispose();
+  }
 
-  AIPrediction? _predictionResult;
+  void _showPredictionDialog(AIPrediction result) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AnimatedPredictionDialog(result: result);
+      },
+    );
+  }
 
   void _calculatePrediction() {
     // 1. Validate all inputs
@@ -54,13 +71,11 @@ class _DashboardPageState extends State<DashboardPage> {
     final noise = double.tryParse(_noiseController.text);
 
     if ([chickenCount, feedAmount, ammonia, lightIntensity, noise].contains(null) || chickenCount! <= 0) {
-      setState(() {
-        _predictionResult = AIPrediction(
-          status: PredictionStatus.danger,
-          predictedEggs: 0,
-          recommendation: "Error: Please ensure all manual input fields are filled with valid numbers and chicken count is greater than 0.",
-        );
-      });
+      _showPredictionDialog(AIPrediction(
+        status: PredictionStatus.danger,
+        predictedEggs: 0,
+        recommendation: "Error: Please ensure all manual input fields are filled with valid numbers and chicken count is greater than 0.",
+      ));
       return;
     }
 
@@ -142,13 +157,11 @@ class _DashboardPageState extends State<DashboardPage> {
       recommendation = issues.join('\n');
     }
 
-    setState(() {
-      _predictionResult = AIPrediction(
-        status: status,
-        recommendation: recommendation,
-        predictedEggs: predictedEggs.round(),
-      );
-    });
+    _showPredictionDialog(AIPrediction(
+      status: status,
+      recommendation: recommendation,
+      predictedEggs: predictedEggs.round(),
+    ));
   }
 
 
@@ -164,6 +177,8 @@ class _DashboardPageState extends State<DashboardPage> {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
+              if (!mounted) return;
+              Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
             },
           ),
         ],
@@ -181,35 +196,87 @@ class _DashboardPageState extends State<DashboardPage> {
             StreamBuilder(
               stream: _sensorRef.onValue,
               builder: (context, AsyncSnapshot<DatabaseEvent> snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                // 1. First, check for explicit errors from the stream
+                if (snapshot.hasError) {
+                  print('Firebase Stream Error: ${snapshot.error}'); // Log the error!
                   return Row(
                     children: [
                       Expanded(
-                        child: _buildSensorCard(context, icon: Icons.thermostat, label: 'Temperature', value: '${_latestTemp.toStringAsFixed(1)} °C', color: Colors.orange, isLoading: true),
+                        child: _buildSensorCard(context, icon: Icons.error, label: 'Temperature', value: 'Error', color: Colors.red, errorMessage: 'Connection Failed'),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
-                        child: _buildSensorCard(context, icon: Icons.water_drop, label: 'Humidity', value: '${_latestHumidity.toStringAsFixed(1)} %', color: Colors.blue, isLoading: true),
+                        child: _buildSensorCard(context, icon: Icons.error, label: 'Humidity', value: 'Error', color: Colors.red, errorMessage: 'Connection Failed'),
                       ),
                     ],
                   );
                 }
-                
-                final data = snapshot.data?.snapshot.value as Map<dynamic, dynamic>? ?? {};
-                _latestTemp = (data['temperature'] ?? _latestTemp).toDouble();
-                _latestHumidity = (data['humidity'] ?? _latestHumidity).toDouble();
 
-                return Row(
-                  children: [
-                    Expanded(
-                      child: _buildSensorCard(context, icon: Icons.thermostat, label: 'Temperature', value: '${_latestTemp.toStringAsFixed(1)} °C', color: Colors.orange),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildSensorCard(context, icon: Icons.water_drop, label: 'Humidity', value: '${_latestHumidity.toStringAsFixed(1)} %', color: Colors.blue),
-                    ),
-                  ],
-                );
+                // 2. Handle the connection state
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.thermostat, label: 'Temperature', value: 'Loading...', color: Colors.orange, isLoading: true),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.water_drop, label: 'Humidity', value: 'Loading...', color: Colors.blue, isLoading: true),
+                      ),
+                    ],
+                  );
+                }
+
+                // 3. Check if we have data and if the data is not null
+                if (!snapshot.hasData || snapshot.data?.snapshot.value == null) {
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.info_outline, label: 'Temperature', value: 'No Data', color: Colors.grey),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.info_outline, label: 'Humidity', value: 'No Data', color: Colors.grey),
+                      ),
+                    ],
+                  );
+                }
+
+                // 4. Safely process the data
+                final data = snapshot.data!.snapshot.value;
+                if (data is Map) {
+                  final Map<Object?, Object?> dataMap = data;
+                  
+                  final tempValue = dataMap['temperature'];
+                  final humValue = dataMap['humidity'];
+
+                  _latestTemp = tempValue is num ? tempValue.toDouble() : 0.0;
+                  _latestHumidity = humValue is num ? humValue.toDouble() : 0.0;
+
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.thermostat, label: 'Temperature', value: '${_latestTemp.toStringAsFixed(1)} °C', color: Colors.orange),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.water_drop, label: 'Humidity', value: '${_latestHumidity.toStringAsFixed(1)} %', color: Colors.blue),
+                      ),
+                    ],
+                  );
+                } else {
+                  return Row(
+                     children: [
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.warning, label: 'Temperature', value: 'Format Error', color: Colors.amber, errorMessage: 'Unexpected data format'),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _buildSensorCard(context, icon: Icons.warning, label: 'Humidity', value: 'Format Error', color: Colors.amber, errorMessage: 'Unexpected data format'),
+                      ),
+                    ],
+                  );
+                }
               },
             ),
             const SizedBox(height: 30),
@@ -242,42 +309,13 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
-            if (_predictionResult != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 20.0),
-                child: _buildPredictionCard(_predictionResult!),
-              )
           ],
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        onTap: (index) {
-          if (index == 1) {
-            Navigator.pushNamed(context, '/settings');
-          } else if (index == 2) {
-            Navigator.pushNamed(context, '/notifications');
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.insights),
-            label: 'Prediction',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-        ],
       ),
     );
   }
 
-  Widget _buildSensorCard(BuildContext context, {required IconData icon, required String label, required String value, required Color color, bool isLoading = false}) {
+  Widget _buildSensorCard(BuildContext context, {required IconData icon, required String label, required String value, required Color color, bool isLoading = false, String? errorMessage}) {
     return Card(
       elevation: 2.0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -298,6 +336,10 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             const SizedBox(height: 8),
             Text(value, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+            if (errorMessage != null) ...[
+              const SizedBox(height: 4),
+              Text(errorMessage, style: TextStyle(color: color, fontSize: 12)),
+            ]
           ],
         ),
       ),
@@ -320,68 +362,155 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+}
 
-  Widget _buildPredictionCard(AIPrediction result) {
-    final bool isHealthy = result.status == PredictionStatus.healthy;
-    final Color cardColor = isHealthy ? Colors.green.shade100 : Colors.red.shade100;
-    final Color textColor = isHealthy ? Colors.green.shade900 : Colors.red.shade900;
+class AnimatedPredictionDialog extends StatefulWidget {
+  final AIPrediction result;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: textColor.withAlpha(128))
+  const AnimatedPredictionDialog({super.key, required this.result});
+
+  @override
+  State<AnimatedPredictionDialog> createState() => _AnimatedPredictionDialogState();
+}
+
+class _AnimatedPredictionDialogState extends State<AnimatedPredictionDialog> with TickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    final bool isHealthy = widget.result.status == PredictionStatus.healthy;
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: isHealthy ? 1200 : 500),
+    );
+
+    if (isHealthy) {
+      _animation = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
+      _controller.forward();
+    } else {
+      _animation = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+      );
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isHealthy = widget.result.status == PredictionStatus.healthy;
+    final Color dialogColor = isHealthy ? Colors.green.shade50 : Colors.red.shade50;
+    final Color titleColor = isHealthy ? Colors.green.shade800 : Colors.red.shade800;
+
+    return AlertDialog(
+      backgroundColor: dialogColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20.0),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'AI Prediction',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(color: textColor, fontWeight: FontWeight.bold),
+      contentPadding: const EdgeInsets.fromLTRB(24.0, 20.0, 24.0, 0),
+      title: Center(
+        child: Text(
+          isHealthy ? 'Prediction: Healthy!' : 'Prediction: Danger!',
+          style: TextStyle(
+            color: titleColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 22,
           ),
-          const Divider(height: 16),
-          _buildInfoRow(
-            icon: null,
-            text: 'Status: ${isHealthy ? 'Healthy' : 'Danger'}' ,
-            color: textColor,
-            isBold: true,
-          ),
-          const SizedBox(height: 12),
-          _buildInfoRow(
-            icon: Icons.lightbulb_outline,
-            text: 'Recommendation: ${result.recommendation}',
-            color: textColor,
-          ),
-          const SizedBox(height: 12),
-          _buildInfoRow(
-            icon: Icons.egg_outlined,
-            text: 'Predicted Daily Egg Production: ${result.predictedEggs}',
-            color: textColor,
-          ),
-        ],
+        ),
       ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 150,
+              child: AnimatedBuilder(
+                animation: _animation,
+                builder: (context, child) {
+                  if (isHealthy) {
+                    return Transform.scale(
+                      scale: _animation.value,
+                      child: child,
+                    );
+                  } else {
+                    return Transform.translate(
+                      offset: Offset(sin(_animation.value * pi * 4) * 8, 0),
+                      child: child,
+                    );
+                  }
+                },
+                child: Icon(
+                  isHealthy ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                  color: titleColor,
+                  size: 100,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _buildDialogInfoRow(
+              icon: Icons.lightbulb_outline,
+              label: 'Recommendation',
+              value: widget.result.recommendation,
+              color: titleColor,
+            ),
+            const SizedBox(height: 12),
+            _buildDialogInfoRow(
+              icon: Icons.egg_outlined,
+              label: 'Predicted Daily Egg Production',
+              value: '${widget.result.predictedEggs}',
+              color: titleColor,
+            ),
+          ],
+        ),
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: <Widget>[
+        TextButton(
+          child: const Text('DISMISS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
     );
   }
 
-  Widget _buildInfoRow({IconData? icon, required String text, required Color color, bool isBold = false}) {
-    return Row(
+  Widget _buildDialogInfoRow({required IconData icon, required String label, required String value, required Color color}) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (icon != null) ...[
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 8),
-        ],
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-              fontSize: 15,
-            ),
+        Text(
+          label,
+          style: TextStyle(
+            color: color.withOpacity(0.8),
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
           ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                value,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
